@@ -252,7 +252,6 @@ MAN=	accept_filter.9 \
 	sleep.9 \
 	sleepqueue.9 \
 	socket.9 \
-	spl.9 \
 	stack.9 \
 	store.9 \
 	style.9 \
@@ -345,6 +344,7 @@ MAN=	accept_filter.9 \
 	vmem.9 \
 	vn_fullpath.9 \
 	vn_isdisk.9 \
+	vnet.9 \
 	vnode.9 \
 	VOP_ACCESS.9 \
 	VOP_ACLCHECK.9 \
@@ -1079,6 +1079,8 @@ MLINKS+=microuptime.9 binuptime.9 \
 	microuptime.9 sbinuptime.9
 MLINKS+=mi_switch.9 cpu_switch.9 \
 	mi_switch.9 cpu_throw.9
+MLINKS+=mod_cc.9 CCV.9 \
+	mod_cc.9 DECLARE_CC_MODULE.9
 MLINKS+=mtx_pool.9 mtx_pool_alloc.9 \
 	mtx_pool.9 mtx_pool_create.9 \
 	mtx_pool.9 mtx_pool_destroy.9 \
@@ -1444,18 +1446,6 @@ MLINKS+=socket.9 soabort.9 \
 	socket.9 soupcall_clear.9 \
 	socket.9 soupcall_set.9 \
 	socket.9 sowakeup.9
-MLINKS+=spl.9 spl0.9 \
-	spl.9 splbio.9 \
-	spl.9 splclock.9 \
-	spl.9 splhigh.9 \
-	spl.9 splimp.9 \
-	spl.9 splnet.9 \
-	spl.9 splsoftclock.9 \
-	spl.9 splsofttty.9 \
-	spl.9 splstatclock.9 \
-	spl.9 spltty.9 \
-	spl.9 splvm.9 \
-	spl.9 splx.9
 MLINKS+=stack.9 stack_copy.9 \
 	stack.9 stack_create.9 \
 	stack.9 stack_destroy.9 \
@@ -1575,12 +1565,16 @@ MLINKS+=timeout.9 callout.9 \
 	timeout.9 callout_pending.9 \
 	timeout.9 callout_reset.9 \
 	timeout.9 callout_reset_curcpu.9 \
-	timeout.9 callout_reset_sbt.9 \
 	timeout.9 callout_reset_on.9 \
+	timeout.9 callout_reset_sbt.9 \
+	timeout.9 callout_reset_sbt_curcpu.9 \
 	timeout.9 callout_reset_sbt_on.9 \
 	timeout.9 callout_schedule.9 \
 	timeout.9 callout_schedule_curcpu.9 \
 	timeout.9 callout_schedule_on.9 \
+	timeout.9 callout_schedule_sbt.9 \
+	timeout.9 callout_schedule_sbt_curcpu.9 \
+	timeout.9 callout_schedule_sbt_on.9 \
 	timeout.9 callout_stop.9 \
 	timeout.9 untimeout.9
 MLINKS+=ucred.9 cred_update_thread.9 \
@@ -1732,6 +1726,7 @@ MLINKS+=VOP_OPENCLOSE.9 VOP_CLOSE.9 \
 MLINKS+=VOP_RDWR.9 VOP_READ.9 \
 	VOP_RDWR.9 VOP_WRITE.9
 MLINKS+=VOP_REMOVE.9 VOP_RMDIR.9
+MLINKS+=vnet.9 vimage.9
 MLINKS+=vref.9 VREF.9
 MLINKS+=vrele.9 vput.9 \
 	vrele.9 vunref.9

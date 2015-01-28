@@ -166,6 +166,8 @@ static bool matched_symbol(SymLook *, const Obj_Entry *, Sym_Match_Result *,
 void r_debug_state(struct r_debug *, struct link_map *) __noinline;
 void _r_debug_postinit(struct link_map *) __noinline;
 
+int __sys_openat(int, const char *, int, ...);
+
 /*
  * Data declarations.
  */
@@ -264,6 +266,8 @@ bool ld_library_path_rpath = false;
 #define	UTRACE_PRELOAD_FINISHED		8
 #define	UTRACE_INIT_CALL		9
 #define	UTRACE_FINI_CALL		10
+#define	UTRACE_DLSYM_START		11
+#define	UTRACE_DLSYM_STOP		12
 
 struct utrace_rtld {
 	char sig[4];			/* 'RTLD' */
@@ -503,6 +507,7 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
       aux_info[AT_STACKPROT]->a_un.a_val != 0)
 	    stack_prot = aux_info[AT_STACKPROT]->a_un.a_val;
 
+#ifndef COMPAT_32BIT
     /*
      * Get the actual dynamic linker pathname from the executable if
      * possible.  (It should always be possible.)  That ensures that
@@ -515,6 +520,7 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 	obj_rtld.path = xstrdup(obj_main->interp);
         __progname = obj_rtld.path;
     }
+#endif
 
     digest_dynamic(obj_main, 0);
     dbg("%s valid_hash_sysv %d valid_hash_gnu %d dynsymcount %d",
@@ -2220,6 +2226,7 @@ do_load_object(int fd, const char *name, char *path, struct stat *sbp,
 	return (NULL);
     }
 
+    obj->dlopened = (flags & RTLD_LO_DLOPEN) != 0;
     *obj_tail = obj;
     obj_tail = &obj->next;
     obj_count++;
@@ -2821,7 +2828,7 @@ search_library_pathfds(const char *name, const char *path, int *fdp)
 		dirfd = parse_libdir(fdstr);
 		if (dirfd < 0)
 			break;
-		fd = openat(dirfd, name, O_RDONLY | O_CLOEXEC);
+		fd = __sys_openat(dirfd, name, O_RDONLY | O_CLOEXEC);
 		if (fd >= 0) {
 			*fdp = fd;
 			len = strlen(fdstr) + strlen(name) + 3;
@@ -3094,6 +3101,7 @@ do_dlsym(void *handle, const char *name, void *retaddr, const Ver_Entry *ve,
     SymLook req;
     RtldLockState lockstate;
     tls_index ti;
+    void *sym;
     int res;
 
     def = NULL;
@@ -3103,6 +3111,7 @@ do_dlsym(void *handle, const char *name, void *retaddr, const Ver_Entry *ve,
     req.flags = flags | SYMLOOK_IN_PLT;
     req.lockstate = &lockstate;
 
+    LD_UTRACE(UTRACE_DLSYM_START, handle, NULL, 0, 0, name);
     rlock_acquire(rtld_bind_lock, &lockstate);
     if (sigsetjmp(lockstate.env, 0) != 0)
 	    lock_upgrade(rtld_bind_lock, &lockstate);
@@ -3112,6 +3121,7 @@ do_dlsym(void *handle, const char *name, void *retaddr, const Ver_Entry *ve,
 	if ((obj = obj_from_addr(retaddr)) == NULL) {
 	    _rtld_error("Cannot determine caller's shared object");
 	    lock_release(rtld_bind_lock, &lockstate);
+	    LD_UTRACE(UTRACE_DLSYM_STOP, handle, NULL, 0, 0, name);
 	    return NULL;
 	}
 	if (handle == NULL) {	/* Just the caller's shared object. */
@@ -3159,6 +3169,7 @@ do_dlsym(void *handle, const char *name, void *retaddr, const Ver_Entry *ve,
     } else {
 	if ((obj = dlcheck(handle)) == NULL) {
 	    lock_release(rtld_bind_lock, &lockstate);
+	    LD_UTRACE(UTRACE_DLSYM_STOP, handle, NULL, 0, 0, name);
 	    return NULL;
 	}
 
@@ -3202,19 +3213,22 @@ do_dlsym(void *handle, const char *name, void *retaddr, const Ver_Entry *ve,
 	 * symbol.
 	 */
 	if (ELF_ST_TYPE(def->st_info) == STT_FUNC)
-	    return (make_function_pointer(def, defobj));
+	    sym = make_function_pointer(def, defobj);
 	else if (ELF_ST_TYPE(def->st_info) == STT_GNU_IFUNC)
-	    return (rtld_resolve_ifunc(defobj, def));
+	    sym = rtld_resolve_ifunc(defobj, def);
 	else if (ELF_ST_TYPE(def->st_info) == STT_TLS) {
 	    ti.ti_module = defobj->tlsindex;
 	    ti.ti_offset = def->st_value;
-	    return (__tls_get_addr(&ti));
+	    sym = __tls_get_addr(&ti);
 	} else
-	    return (defobj->relocbase + def->st_value);
+	    sym = defobj->relocbase + def->st_value;
+	LD_UTRACE(UTRACE_DLSYM_STOP, handle, sym, 0, 0, name);
+	return (sym);
     }
 
     _rtld_error("Undefined symbol \"%s\"", name);
     lock_release(rtld_bind_lock, &lockstate);
+    LD_UTRACE(UTRACE_DLSYM_STOP, handle, NULL, 0, 0, name);
     return NULL;
 }
 
@@ -4880,6 +4894,27 @@ _rtld_get_stack_prot(void)
 {
 
 	return (stack_prot);
+}
+
+int
+_rtld_is_dlopened(void *arg)
+{
+	Obj_Entry *obj;
+	RtldLockState lockstate;
+	int res;
+
+	rlock_acquire(rtld_bind_lock, &lockstate);
+	obj = dlcheck(arg);
+	if (obj == NULL)
+		obj = obj_from_addr(arg);
+	if (obj == NULL) {
+		_rtld_error("No shared object contains address");
+		lock_release(rtld_bind_lock, &lockstate);
+		return (-1);
+	}
+	res = obj->dlopened ? 1 : 0;
+	lock_release(rtld_bind_lock, &lockstate);
+	return (res);
 }
 
 static void

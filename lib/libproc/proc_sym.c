@@ -335,8 +335,8 @@ proc_addr2sym(struct proc_handle *p, uintptr_t addr, char *name,
 		goto out;
 
 	error = lookup_addr(e, symtabscn, symtabstridx, off, addr, &s, symcopy);
-	if (error == 0)
-		goto out;
+	if (error != 0)
+		goto err2;
 
 out:
 	demangle(s, name, namesz);
@@ -501,13 +501,16 @@ ctf_file_t *
 proc_name2ctf(struct proc_handle *p, const char *name)
 {
 #ifndef NO_CTF
+	ctf_file_t *ctf;
 	prmap_t *map;
 	int error;
 
 	if ((map = proc_name2map(p, name)) == NULL)
 		return (NULL);
 
-	return (ctf_open(map->pr_mapname, &error));
+	ctf = ctf_open(map->pr_mapname, &error);
+	free(map);
+	return (ctf);
 #else
 	(void)p;
 	(void)name;
