@@ -30,6 +30,10 @@
 #ifndef _SYS_JAIL_H_
 #define _SYS_JAIL_H_
 
+#if defined(_KERNEL) || defined(_WANT_PRISON)
+#include <sys/pax.h>
+#endif
+
 #ifdef _KERNEL
 struct jail_v0 {
 	u_int32_t	version;
@@ -184,15 +188,7 @@ struct prison {
 	char		 pr_hostname[MAXHOSTNAMELEN];	/* (p) jail hostname */
 	char		 pr_domainname[MAXHOSTNAMELEN];	/* (p) jail domainname */
 	char		 pr_hostuuid[HOSTUUIDLEN];	/* (p) jail hostuuid */
-    /* Lock only needed for pax_* if pr_pax_set == 0 */
-	int		 pr_pax_aslr_status;		/* (p) PaX ASLR enabled */
-	int		 pr_pax_aslr_mmap_len;		/* (p) Number of bits randomized with mmap */
-	int		 pr_pax_aslr_stack_len;		/* (p) Number of bits randomized with stack */
-	int		 pr_pax_aslr_exec_len;		/* (p) Number of bits randomized with the execbase */
-	int		 pr_pax_aslr_compat_status;	/* (p) PaX ASLR enabled (compat32) */
-	int		 pr_pax_aslr_compat_mmap_len;	/* (p) Number of bits randomized with mmap (compat32) */
-	int		 pr_pax_aslr_compat_stack_len;	/* (p) Number of bits randomized with stack (compat32) */
-	int		 pr_pax_aslr_compat_exec_len;	/* (p) Number of bits randomized with the execbase (compat32) */
+	struct hardening_features	pr_hardening;	/* (p) PaX-inspired hardening features */
 };
 
 struct prison_racct {

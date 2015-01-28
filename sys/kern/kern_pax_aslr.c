@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
- * Copyright (c) 2013-2014, by Oliver Pinter <oliver.pntr at gmail.com>
+ * Copyright (c) 2013-2015, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
  * Copyright (c) 2014, by Shawn Webb <lattera at gmail.com>
  * All rights reserved.
  *
@@ -27,6 +27,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD$
+ *
+ * HardenedBSD-version: f3999cdf0bf50578e038f10b952ffc1c446d8927
+ *
  */
 
 #include <sys/cdefs.h>
@@ -42,7 +45,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/imgact.h>
 #include <sys/imgact_elf.h>
 #include <sys/sysent.h>
-#include <sys/systm.h>
 #include <sys/stat.h>
 #include <sys/proc.h>
 #include <sys/elf_common.h>
@@ -73,32 +75,32 @@ __FBSDID("$FreeBSD$");
 /*
  * generic ASLR values
  *
- *  	MMAP	| 32 bit | 64 bit |
- * 	+-------+--------+--------+
- * 	| MIN	|  8 bit | 16 bit |
- * 	+-------+--------+--------+
- * 	| DEF	| 14 bit | 21 bit |
- * 	+-------+--------+--------+
- * 	| MAX   | 20 bit | 32 bit |
- * 	+-------+--------+--------+
- *
- *  	STACK	| 32 bit | 64 bit |
- * 	+-------+--------+--------+
- * 	| MIN	|  6 bit | 12 bit |
- * 	+-------+--------+--------+
- * 	| DEF	|  6 bit | 16 bit |
- * 	+-------+--------+--------+
- * 	| MAX   | 10 bit | 21 bit |
- * 	+-------+--------+--------+
- *
- *  	EXEC	| 32 bit | 64 bit |
- * 	+-------+--------+--------+
- * 	| MIN	|  6 bit | 12 bit |
- * 	+-------+--------+--------+
- * 	| DEF	| 14 bit | 21 bit |
- * 	+-------+--------+--------+
- * 	| MAX   | 20 bit | 21 bit |
- * 	+-------+--------+--------+
+ *  	MMAP	| 32 bit | 64 bit | compat |
+ * 	+-------+--------+--------+--------+
+ * 	| MIN	|  8 bit | 16 bit |  8 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| DEF	| 14 bit | 21 bit | 14 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| MAX   | 21 bit | 42 bit | 21 bit |
+ * 	+-------+--------+--------+--------+
+ *                                          
+ *  	STACK	| 32 bit | 64 bit | 32 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| MIN	|  8 bit | 16 bit |  8 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| DEF	|  8 bit | 16 bit |  8 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| MAX   | 21 bit | 42 bit | 21 bit |
+ * 	+-------+--------+--------+--------+
+ *                                          
+ *  	EXEC	| 32 bit | 64 bit | 32 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| MIN	|  8 bit | 16 bit |  8 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| DEF	| 14 bit | 16 bit | 14 bit |
+ * 	+-------+--------+--------+--------+
+ * 	| MAX   | 21 bit | 42 bit | 21 bit |
+ * 	+-------+--------+--------+--------+
  *
  */
 #ifndef PAX_ASLR_DELTA_MMAP_LSB
@@ -110,11 +112,7 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_DELTA_MMAP_MAX_LEN */
 
 #ifndef PAX_ASLR_DELTA_MMAP_MAX_LEN
-#ifdef __LP64__
-#define PAX_ASLR_DELTA_MMAP_MAX_LEN	((sizeof(void *) * NBBY) / 2)
-#else
-#define PAX_ASLR_DELTA_MMAP_MAX_LEN	20
-#endif /* __LP64__ */
+#define PAX_ASLR_DELTA_MMAP_MAX_LEN	(((sizeof(void *) * NBBY) * 2) / 3)
 #endif /* PAX_ASLR_DELTA_MMAP_MAX_LEN */
 
 #ifndef PAX_ASLR_DELTA_STACK_LSB
@@ -122,11 +120,11 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_DELTA_STACK_LSB */
 
 #ifndef PAX_ASLR_DELTA_STACK_MIN_LEN
-#define PAX_ASLR_DELTA_STACK_MIN_LEN	((sizeof(void *) * NBBY) / 5)
+#define PAX_ASLR_DELTA_STACK_MIN_LEN	((sizeof(void *) * NBBY) / 4)
 #endif /* PAX_ASLR_DELTA_STACK_MAX_LEN */
 
 #ifndef PAX_ASLR_DELTA_STACK_MAX_LEN
-#define PAX_ASLR_DELTA_STACK_MAX_LEN	((sizeof(void *) * NBBY) / 3)
+#define PAX_ASLR_DELTA_STACK_MAX_LEN	(((sizeof(void *) * NBBY) * 2) / 3)
 #endif /* PAX_ASLR_DELTA_STACK_MAX_LEN */
 
 #ifndef PAX_ASLR_DELTA_EXEC_LSB
@@ -134,15 +132,11 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_DELTA_EXEC_LSB */
 
 #ifndef PAX_ASLR_DELTA_EXEC_MIN_LEN
-#define PAX_ASLR_DELTA_EXEC_MIN_LEN	((sizeof(void *) * NBBY) / 5)
+#define PAX_ASLR_DELTA_EXEC_MIN_LEN	((sizeof(void *) * NBBY) / 4)
 #endif /* PAX_ASLR_DELTA_EXEC_MIN_LEN */
 
 #ifndef PAX_ASLR_DELTA_EXEC_MAX_LEN
-#ifdef __LP64__
-#define PAX_ASLR_DELTA_EXEC_MAX_LEN	((sizeof(void *) * NBBY) / 3)
-#else
-#define PAX_ASLR_DELTA_EXEC_MAX_LEN	20
-#endif /* __LP64__ */
+#define PAX_ASLR_DELTA_EXEC_MAX_LEN	(((sizeof(void *) * NBBY) * 2) / 3)
 #endif /* PAX_ASLR_DELTA_EXEC_MAX_LEN */
 
 /*
@@ -156,9 +150,9 @@ __FBSDID("$FreeBSD$");
 #define PAX_ASLR_DELTA_STACK_DEF_LEN	16
 #endif /* PAX_ASLR_DELTA_STACK_DEF_LEN */
 #ifndef PAX_ASLR_DELTA_EXEC_DEF_LEN
-#define PAX_ASLR_DELTA_EXEC_DEF_LEN	21
+#define PAX_ASLR_DELTA_EXEC_DEF_LEN	16
 #endif /* PAX_ASLR_DELTA_EXEC_DEF_LEN */
-#else
+#else /* ! __LP64__ */
 #ifndef PAX_ASLR_DELTA_MMAP_DEF_LEN
 #define PAX_ASLR_DELTA_MMAP_DEF_LEN	14
 #endif /* PAX_ASLR_DELTA_MMAP_DEF_LEN */
@@ -183,7 +177,7 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_COMPAT_DELTA_MMAP_MAX_LEN */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_MMAP_MAX_LEN
-#define PAX_ASLR_COMPAT_DELTA_MMAP_MAX_LEN	((sizeof(int) * NBBY) / 2)
+#define PAX_ASLR_COMPAT_DELTA_MMAP_MAX_LEN	(((sizeof(int) * NBBY) * 2) / 3)
 #endif /* PAX_ASLR_COMPAT_DELTA_MMAP_MAX_LEN */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_STACK_LSB
@@ -191,11 +185,11 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_COMPAT_DELTA_STACK_LSB */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_STACK_MIN_LEN
-#define PAX_ASLR_COMPAT_DELTA_STACK_MIN_LEN	((sizeof(int) * NBBY) / 5)
+#define PAX_ASLR_COMPAT_DELTA_STACK_MIN_LEN	((sizeof(int) * NBBY) / 4)
 #endif /* PAX_ASLR_COMPAT_DELTA_STACK_MAX_LEN */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_STACK_MAX_LEN
-#define PAX_ASLR_COMPAT_DELTA_STACK_MAX_LEN	((sizeof(int) * NBBY) / 3)
+#define PAX_ASLR_COMPAT_DELTA_STACK_MAX_LEN	(((sizeof(int) * NBBY) * 2) / 3)
 #endif /* PAX_ASLR_COMPAT_DELTA_STACK_MAX_LEN */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_EXEC_LSB
@@ -203,39 +197,26 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_COMPAT_DELTA_EXEC_LSB */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_EXEC_MIN_LEN
-#define PAX_ASLR_COMPAT_DELTA_EXEC_MIN_LEN	((sizeof(int) * NBBY) / 5)
+#define PAX_ASLR_COMPAT_DELTA_EXEC_MIN_LEN	((sizeof(int) * NBBY) / 4)
 #endif /* PAX_ASLR_COMPAT_DELTA_EXEC_MAX_LEN */
 
 #ifndef PAX_ASLR_COMPAT_DELTA_EXEC_MAX_LEN
-#define PAX_ASLR_COMPAT_DELTA_EXEC_MAX_LEN	((sizeof(int) * NBBY) / 3)
+#define PAX_ASLR_COMPAT_DELTA_EXEC_MAX_LEN	(((sizeof(int) * NBBY) * 2) / 3)
 #endif /* PAX_ASLR_COMPAT_DELTA_EXEC_MAX_LEN */
 #endif
 
 FEATURE(aslr, "Address Space Layout Randomization.");
 
-int pax_aslr_status = PAX_FEATURE_OPTOUT;
-
-#ifdef PAX_ASLR_MAX_SEC
-int pax_aslr_mmap_len = PAX_ASLR_DELTA_MMAP_MAX_LEN;
-int pax_aslr_stack_len = PAX_ASLR_DELTA_STACK_MAX_LEN;
-int pax_aslr_exec_len = PAX_ASLR_DELTA_EXEC_MAX_LEN;
-#else
-int pax_aslr_mmap_len = PAX_ASLR_DELTA_MMAP_DEF_LEN;
-int pax_aslr_stack_len = PAX_ASLR_DELTA_STACK_DEF_LEN;
-int pax_aslr_exec_len = PAX_ASLR_DELTA_EXEC_DEF_LEN;
-#endif /* PAX_ASLR_MAX_SEC */
+static int pax_aslr_status = PAX_FEATURE_OPTOUT;
+static int pax_aslr_mmap_len = PAX_ASLR_DELTA_MMAP_DEF_LEN;
+static int pax_aslr_stack_len = PAX_ASLR_DELTA_STACK_DEF_LEN;
+static int pax_aslr_exec_len = PAX_ASLR_DELTA_EXEC_DEF_LEN;
 
 #ifdef COMPAT_FREEBSD32
-int pax_aslr_compat_status = PAX_FEATURE_OPTOUT;
-#ifdef PAX_ASLR_MAX_SEC
-int pax_aslr_compat_mmap_len = PAX_ASLR_COMPAT_DELTA_MMAP_MAX_LEN;
-int pax_aslr_compat_stack_len = PAX_ASLR_COMPAT_DELTA_STACK_MAX_LEN;
-int pax_aslr_compat_exec_len = PAX_ASLR_COMPAT_DELTA_EXEC_MAX_LEN;
-#else
-int pax_aslr_compat_mmap_len = PAX_ASLR_COMPAT_DELTA_MMAP_MIN_LEN;
-int pax_aslr_compat_stack_len = PAX_ASLR_COMPAT_DELTA_STACK_MIN_LEN;
-int pax_aslr_compat_exec_len = PAX_ASLR_COMPAT_DELTA_EXEC_MIN_LEN;
-#endif /* PAX_ASLR_MAX_SEC */
+static int pax_aslr_compat_status = PAX_FEATURE_OPTOUT;
+static int pax_aslr_compat_mmap_len = PAX_ASLR_COMPAT_DELTA_MMAP_MIN_LEN;
+static int pax_aslr_compat_stack_len = PAX_ASLR_COMPAT_DELTA_STACK_MIN_LEN;
+static int pax_aslr_compat_exec_len = PAX_ASLR_COMPAT_DELTA_EXEC_MIN_LEN;
 #endif /* COMPAT_FREEBSD32 */
 
 TUNABLE_INT("security.pax.aslr.status", &pax_aslr_status);
@@ -244,17 +225,16 @@ TUNABLE_INT("security.pax.aslr.stack_len", &pax_aslr_stack_len);
 TUNABLE_INT("security.pax.aslr.exec_len", &pax_aslr_exec_len);
 #ifdef COMPAT_FREEBSD32
 TUNABLE_INT("security.pax.aslr.compat.status", &pax_aslr_compat_status);
-TUNABLE_INT("security.pax.aslr.compat.mmap", &pax_aslr_compat_mmap_len);
-TUNABLE_INT("security.pax.aslr.compat.stack", &pax_aslr_compat_stack_len);
-TUNABLE_INT("security.pax.aslr.compat.exec", &pax_aslr_compat_exec_len);
+TUNABLE_INT("security.pax.aslr.compat.mmap_len", &pax_aslr_compat_mmap_len);
+TUNABLE_INT("security.pax.aslr.compat.stack_len", &pax_aslr_compat_stack_len);
+TUNABLE_INT("security.pax.aslr.compat.exec_len", &pax_aslr_compat_exec_len);
 #endif
 
 #ifdef PAX_SYSCTLS
-
 SYSCTL_DECL(_security_pax);
 
 /*
- * sysctls and tunables
+ * sysctls
  */
 static int sysctl_pax_aslr_status(SYSCTL_HANDLER_ARGS);
 static int sysctl_pax_aslr_mmap(SYSCTL_HANDLER_ARGS);
@@ -278,19 +258,19 @@ SYSCTL_PROC(_security_pax_aslr, OID_AUTO, mmap_len,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE,
     NULL, 0, sysctl_pax_aslr_mmap, "I",
     "Number of bits randomized for mmap(2) calls. "
-    "32 bit: [8,16] 64 bit: [16,32]");
+    "32 bit: [8,21] 64 bit: [16,42]");
 
 SYSCTL_PROC(_security_pax_aslr, OID_AUTO, stack_len,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE,
     NULL, 0, sysctl_pax_aslr_stack, "I",
     "Number of bits randomized for the stack. "
-    "32 bit: [6,12] 64 bit: [12,21]");
+    "32 bit: [8,21] 64 bit: [16,42]");
 
 SYSCTL_PROC(_security_pax_aslr, OID_AUTO, exec_len,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE,
     NULL, 0, sysctl_pax_aslr_exec, "I",
     "Number of bits randomized for the PIE exec base. "
-    "32 bit: [6,12] 64 bit: [12,21]");
+    "32 bit: [8,21] 64 bit: [16,42]");
 
 static int
 sysctl_pax_aslr_status(SYSCTL_HANDLER_ARGS)
@@ -298,9 +278,9 @@ sysctl_pax_aslr_status(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_status;
+	val = pr->pr_hardening.hr_pax_aslr_status;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || (req->newptr == NULL))
 		return (err);
@@ -313,7 +293,7 @@ sysctl_pax_aslr_status(SYSCTL_HANDLER_ARGS)
 		if (pr == &prison0)
 			pax_aslr_status = val;
 
-		pr->pr_pax_aslr_status = val;
+		pr->pr_hardening.hr_pax_aslr_status = val;
 		break;
 	default:
 		return (EINVAL);
@@ -328,9 +308,9 @@ sysctl_pax_aslr_mmap(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_mmap_len;
+	val = pr->pr_hardening.hr_pax_aslr_mmap_len;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || !req->newptr)
 		return (err);
@@ -342,7 +322,7 @@ sysctl_pax_aslr_mmap(SYSCTL_HANDLER_ARGS)
 	if (pr == &prison0)
 		pax_aslr_mmap_len = val;
 
-	pr->pr_pax_aslr_mmap_len = val;
+	pr->pr_hardening.hr_pax_aslr_mmap_len = val;
 
 	return (0);
 }
@@ -353,9 +333,9 @@ sysctl_pax_aslr_stack(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_stack_len;
+	val = pr->pr_hardening.hr_pax_aslr_stack_len;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || !req->newptr)
 		return (err);
@@ -367,7 +347,7 @@ sysctl_pax_aslr_stack(SYSCTL_HANDLER_ARGS)
 	if (pr == &prison0)
 		pax_aslr_stack_len = val;
 
-	pr->pr_pax_aslr_stack_len = val;
+	pr->pr_hardening.hr_pax_aslr_stack_len = val;
 
 	return (0);
 }
@@ -378,9 +358,9 @@ sysctl_pax_aslr_exec(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_exec_len;
+	val = pr->pr_hardening.hr_pax_aslr_exec_len;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || (req->newptr == NULL))
 		return (err);
@@ -392,7 +372,7 @@ sysctl_pax_aslr_exec(SYSCTL_HANDLER_ARGS)
 	if (pr == &prison0)
 		pax_aslr_exec_len = val;
 
-	pr->pr_pax_aslr_exec_len = val;
+	pr->pr_hardening.hr_pax_aslr_exec_len = val;
 
 	return (0);
 }
@@ -426,13 +406,13 @@ SYSCTL_PROC(_security_pax_aslr_compat, OID_AUTO, stack_len,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON,
     NULL, 0, sysctl_pax_aslr_compat_stack, "I",
     "Number of bits randomized for the stack. "
-    "32 bit: [6,12]");
+    "32 bit: [8,16]");
 
 SYSCTL_PROC(_security_pax_aslr_compat, OID_AUTO, exec_len,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON,
     NULL, 0, sysctl_pax_aslr_compat_exec, "I",
     "Number of bits randomized for the PIE exec base. "
-    "32 bit: [6,12]");
+    "32 bit: [8,16]");
 
 static int
 sysctl_pax_aslr_compat_status(SYSCTL_HANDLER_ARGS)
@@ -440,9 +420,9 @@ sysctl_pax_aslr_compat_status(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_compat_status;
+	val = pr->pr_hardening.hr_pax_aslr_compat_status;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || (req->newptr == NULL))
 		return (err);
@@ -455,7 +435,7 @@ sysctl_pax_aslr_compat_status(SYSCTL_HANDLER_ARGS)
 		if (pr == &prison0)
 			pax_aslr_compat_status = val;
 
-		pr->pr_pax_aslr_compat_status = val;
+		pr->pr_hardening.hr_pax_aslr_compat_status = val;
 		break;
 	default:
 		return (EINVAL);
@@ -470,9 +450,9 @@ sysctl_pax_aslr_compat_mmap(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_compat_mmap_len;
+	val = pr->pr_hardening.hr_pax_aslr_compat_mmap_len;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || !req->newptr)
 		return (err);
@@ -484,7 +464,7 @@ sysctl_pax_aslr_compat_mmap(SYSCTL_HANDLER_ARGS)
 	if (pr == &prison0)
 		pax_aslr_compat_mmap_len = val;
 
-	pr->pr_pax_aslr_compat_mmap_len = val;
+	pr->pr_hardening.hr_pax_aslr_compat_mmap_len = val;
 
 	return (0);
 }
@@ -495,9 +475,9 @@ sysctl_pax_aslr_compat_stack(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_compat_stack_len;
+	val = pr->pr_hardening.hr_pax_aslr_compat_stack_len;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || !req->newptr)
 		return (err);
@@ -509,7 +489,7 @@ sysctl_pax_aslr_compat_stack(SYSCTL_HANDLER_ARGS)
 	if (pr == &prison0)
 		pax_aslr_compat_stack_len = val;
 
-	pr->pr_pax_aslr_compat_stack_len = val;
+	pr->pr_hardening.hr_pax_aslr_compat_stack_len = val;
 
 	return (0);
 }
@@ -520,9 +500,9 @@ sysctl_pax_aslr_compat_exec(SYSCTL_HANDLER_ARGS)
 	struct prison *pr;
 	int err, val;
 
-	pr = pax_get_prison(req->td->td_proc);
+	pr = pax_get_prison_td(req->td);
 
-	val = pr->pr_pax_aslr_compat_exec_len;
+	val = pr->pr_hardening.hr_pax_aslr_compat_exec_len;
 	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
 	if (err || !req->newptr)
 		return (err);
@@ -534,7 +514,7 @@ sysctl_pax_aslr_compat_exec(SYSCTL_HANDLER_ARGS)
 	if (pr == &prison0)
 		pax_aslr_compat_exec_len = val;
 
-	pr->pr_pax_aslr_compat_exec_len = val;
+	pr->pr_hardening.hr_pax_aslr_compat_exec_len = val;
 
 	return (0);
 }
@@ -558,18 +538,16 @@ pax_aslr_sysinit(void)
 	case PAX_FEATURE_FORCE_ENABLED:
 		break;
 	default:
-		printf("PAX ASLR WARNING, invalid PAX settings in loader.conf!"
+		printf("warning: invalid settings in loader.conf:"
 		    " (pax_aslr_status = %d)\n", pax_aslr_status);
 		pax_aslr_status = PAX_FEATURE_FORCE_ENABLED;
 		break;
 	}
 	if (bootverbose) {
-		printf("PAX ASLR status: %s\n",
-		    pax_status_str[pax_aslr_status]);
-		printf("PAX ASLR mmap: %d bits\n", pax_aslr_mmap_len);
-		printf("PAX ASLR exec base: %d bits\n",
-		    pax_aslr_exec_len);
-		printf("PAX ASLR stack: %d bits\n", pax_aslr_stack_len);
+		printf("PAX ASLR status: %s\n", pax_status_str[pax_aslr_status]);
+		printf("PAX ASLR mmap: %d bit\n", pax_aslr_mmap_len);
+		printf("PAX ASLR exec base: %d bit\n", pax_aslr_exec_len);
+		printf("PAX ASLR stack: %d bit\n", pax_aslr_stack_len);
 	}
 }
 SYSINIT(pax_aslr, SI_SUB_PAX, SI_ORDER_SECOND, pax_aslr_sysinit, NULL);
@@ -577,7 +555,7 @@ SYSINIT(pax_aslr, SI_SUB_PAX, SI_ORDER_SECOND, pax_aslr_sysinit, NULL);
 int
 pax_aslr_active(struct proc *p)
 {
-	u_int flags;
+	uint32_t flags;
 
 	pax_get_flags(p, &flags);
 
@@ -598,23 +576,26 @@ pax_aslr_init_vmspace(struct proc *p)
 {
 	struct prison *pr;
 	struct vmspace *vm;
+	long rand_buf;
 
 	vm = p->p_vmspace;
-	KASSERT(vm != NULL, ("%s: vm is null", __func__));
 
 	pr = pax_get_prison(p);
-	vm->vm_aslr_delta_mmap = PAX_ASLR_DELTA(arc4random(),
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_mmap = PAX_ASLR_DELTA(rand_buf,
 	    PAX_ASLR_DELTA_MMAP_LSB,
-	    pr->pr_pax_aslr_mmap_len);
+	    pr->pr_hardening.hr_pax_aslr_mmap_len);
 
-	vm->vm_aslr_delta_stack = PAX_ASLR_DELTA(arc4random(),
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_stack = PAX_ASLR_DELTA(rand_buf,
 	    PAX_ASLR_DELTA_STACK_LSB,
-	    pr->pr_pax_aslr_stack_len);
+	    pr->pr_hardening.hr_pax_aslr_stack_len);
 	vm->vm_aslr_delta_stack = ALIGN(vm->vm_aslr_delta_stack);
 
-	vm->vm_aslr_delta_exec = PAX_ASLR_DELTA(arc4random(),
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_exec = PAX_ASLR_DELTA(rand_buf,
 	    PAX_ASLR_DELTA_EXEC_LSB,
-	    pr->pr_pax_aslr_exec_len);
+	    pr->pr_hardening.hr_pax_aslr_exec_len);
 
 	CTR2(KTR_PAX, "%s: vm_aslr_delta_mmap=%p\n",
 	    __func__, (void *)vm->vm_aslr_delta_mmap);
@@ -636,7 +617,7 @@ pax_compat_aslr_sysinit(void)
 	case PAX_FEATURE_FORCE_ENABLED:
 		break;
 	default:
-		printf("PAX ASLR (compat) WARNING, invalid PAX settings in loader.conf! "
+		printf("warning: invalid settings in loader.conf! "
 		    "(pax_aslr_compat_status = %d)\n", pax_aslr_compat_status);
 		pax_aslr_compat_status = PAX_FEATURE_FORCE_ENABLED;
 		break;
@@ -655,23 +636,26 @@ pax_aslr_init_vmspace32(struct proc *p)
 {
 	struct prison *pr;
 	struct vmspace *vm;
+	long rand_buf;
 
 	vm = p->p_vmspace;
-	KASSERT(vm != NULL, ("%s: vm is null", __func__));
 
 	pr = pax_get_prison(p);
-	vm->vm_aslr_delta_mmap = PAX_ASLR_DELTA(arc4random(),
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_mmap = PAX_ASLR_DELTA(rand_buf,
 	    PAX_ASLR_COMPAT_DELTA_MMAP_LSB,
-	    pr->pr_pax_aslr_compat_mmap_len);
+	    pr->pr_hardening.hr_pax_aslr_compat_mmap_len);
 
-	vm->vm_aslr_delta_stack = PAX_ASLR_DELTA(arc4random(),
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_stack = PAX_ASLR_DELTA(rand_buf,
 	    PAX_ASLR_COMPAT_DELTA_STACK_LSB,
-	    pr->pr_pax_aslr_compat_stack_len);
+	    pr->pr_hardening.hr_pax_aslr_compat_stack_len);
 	vm->vm_aslr_delta_stack = ALIGN(vm->vm_aslr_delta_stack);
 
-	vm->vm_aslr_delta_exec = PAX_ASLR_DELTA(arc4random(),
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_exec = PAX_ASLR_DELTA(rand_buf,
 	    PAX_ASLR_COMPAT_DELTA_EXEC_LSB,
-	    pr->pr_pax_aslr_compat_exec_len);
+	    pr->pr_hardening.hr_pax_aslr_compat_exec_len);
 
 	CTR2(KTR_PAX, "%s: vm_aslr_delta_mmap=%p\n",
 	    __func__, (void *)vm->vm_aslr_delta_mmap);
@@ -695,6 +679,76 @@ pax_aslr_init(struct image_params *imgp)
 	if (imgp->sysent->sv_pax_aslr_init != NULL)
 		imgp->sysent->sv_pax_aslr_init(p);
 }
+
+void
+pax_aslr_init_prison(struct prison *pr)
+{
+	struct prison *pr_p;
+
+	CTR2(KTR_PAX, "%s: Setting prison %s PaX variables\n",
+	    __func__, pr->pr_name);
+
+	if (pr == &prison0) {
+		/* prison0 has no parent, use globals */
+		pr->pr_hardening.hr_pax_aslr_status = pax_aslr_status;
+		pr->pr_hardening.hr_pax_aslr_mmap_len =
+		    pax_aslr_mmap_len;
+		pr->pr_hardening.hr_pax_aslr_stack_len =
+		    pax_aslr_stack_len;
+		pr->pr_hardening.hr_pax_aslr_exec_len =
+		    pax_aslr_exec_len;
+	} else {
+		KASSERT(pr->pr_parent != NULL,
+		   ("%s: pr->pr_parent == NULL", __func__));
+		pr_p = pr->pr_parent;
+
+		pr->pr_hardening.hr_pax_aslr_status =
+		    pr_p->pr_hardening.hr_pax_aslr_status;
+		pr->pr_hardening.hr_pax_aslr_mmap_len =
+		    pr_p->pr_hardening.hr_pax_aslr_mmap_len;
+		pr->pr_hardening.hr_pax_aslr_stack_len =
+		    pr_p->pr_hardening.hr_pax_aslr_stack_len;
+		pr->pr_hardening.hr_pax_aslr_exec_len =
+		    pr_p->pr_hardening.hr_pax_aslr_exec_len;
+	}
+}
+
+#ifdef COMPAT_FREEBSD32
+void
+pax_aslr_init_prison32(struct prison *pr)
+{
+	struct prison *pr_p;
+
+	CTR2(KTR_PAX, "%s: Setting prison %s PaX variables\n",
+	    __func__, pr->pr_name);
+
+	if (pr == &prison0) {
+		/* prison0 has no parent, use globals */
+
+		pr->pr_hardening.hr_pax_aslr_compat_status =
+		    pax_aslr_compat_status;
+		pr->pr_hardening.hr_pax_aslr_compat_mmap_len =
+		    pax_aslr_compat_mmap_len;
+		pr->pr_hardening.hr_pax_aslr_compat_stack_len =
+		    pax_aslr_compat_stack_len;
+		pr->pr_hardening.hr_pax_aslr_compat_exec_len =
+		    pax_aslr_compat_exec_len;
+	} else {
+		KASSERT(pr->pr_parent != NULL,
+		   ("%s: pr->pr_parent == NULL", __func__));
+		pr_p = pr->pr_parent;
+
+		pr->pr_hardening.hr_pax_aslr_compat_status =
+		    pr_p->pr_hardening.hr_pax_aslr_compat_status;
+		pr->pr_hardening.hr_pax_aslr_compat_mmap_len =
+		    pr_p->pr_hardening.hr_pax_aslr_compat_mmap_len;
+		pr->pr_hardening.hr_pax_aslr_compat_stack_len =
+		    pr_p->pr_hardening.hr_pax_aslr_compat_stack_len;
+		pr->pr_hardening.hr_pax_aslr_compat_exec_len =
+		    pr_p->pr_hardening.hr_pax_aslr_compat_exec_len;
+	}
+}
+#endif /* COMPAT_FREEBSD32 */
 
 void
 pax_aslr_mmap(struct proc *p, vm_offset_t *addr, vm_offset_t orig_addr, int flags)
@@ -743,24 +797,36 @@ pax_aslr_stack(struct proc *p, uintptr_t *addr)
 }
 
 void
+pax_aslr_stack_adjust(struct proc *p, u_long *ssiz)
+{
+
+	if (!pax_aslr_active(p))
+		return;
+
+	*ssiz += p->p_vmspace->vm_aslr_delta_stack;
+}
+
+void
 pax_aslr_execbase(struct proc *p, u_long *et_dyn_addr)
 {
 
-	if (pax_aslr_active(p))
-		*et_dyn_addr += p->p_vmspace->vm_aslr_delta_exec;
+	if (!pax_aslr_active(p))
+		return;
+
+	*et_dyn_addr += p->p_vmspace->vm_aslr_delta_exec;
 }
 
-u_int
-pax_aslr_setup_flags(struct image_params *imgp, u_int mode)
+uint32_t
+pax_aslr_setup_flags(struct image_params *imgp, uint32_t mode)
 {
 	struct prison *pr;
-	u_int flags, status;
+	uint32_t flags, status;
 
 	flags = 0;
 	status = 0;
 
 	pr = pax_get_prison(imgp->proc);
-	status = pr->pr_pax_aslr_status;
+	status = pr->pr_hardening.hr_pax_aslr_status;
 
 	if (status == PAX_FEATURE_DISABLED) {
 		flags &= ~PAX_NOTE_ASLR;
@@ -808,3 +874,4 @@ pax_aslr_setup_flags(struct image_params *imgp, u_int mode)
 
 	return (flags);
 }
+

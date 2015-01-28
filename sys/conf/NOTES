@@ -2985,5 +2985,5 @@ options 	RANDOM_DEBUG	# Debugging messages
 options         IMAGACT_BINMISC
 
 # Address Space Layout Randomization (ASLR)
-options		PAX_ASLR
-options		PAX_SYSCTLS
+options		PAX_ASLR	# Address Space Layout Randomization
+options		PAX_SYSCTLS	# Run-time settings for PAX and Hardening

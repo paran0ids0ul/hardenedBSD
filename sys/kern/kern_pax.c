@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
- * Copyright (c) 2013-2014, by Oliver Pinter <oliver.pntr at gmail.com>
+ * Copyright (c) 2013-2014, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
  * Copyright (c) 2014, by Shawn Webb <lattera at gmail.com>
  * All rights reserved.
  *
@@ -27,6 +27,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD$
+ *
+ * HardenedBSD-version: f3999cdf0bf50578e038f10b952ffc1c446d8927
+ *
  */
 
 #include <sys/cdefs.h>
@@ -42,6 +45,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/imgact_elf.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+#include <sys/sx.h>
 #include <sys/sysent.h>
 #include <sys/stat.h>
 #include <sys/proc.h>
@@ -68,6 +72,9 @@ __FBSDID("$FreeBSD$");
 #include <machine/elf.h>
 
 #include <sys/pax.h>
+
+static int pax_validate_flags(uint32_t flags);
+static int pax_check_conflicting_modes(uint32_t mode);
 
 SYSCTL_NODE(_security, OID_AUTO, pax, CTLFLAG_RD, 0,
     "PaX (exploit mitigation) features.");
@@ -96,6 +103,16 @@ pax_get_prison(struct proc *p)
 	return (p->p_ucred->cr_prison);
 }
 
+struct prison *
+pax_get_prison_td(struct thread *td)
+{
+
+	if (td == NULL || td->td_ucred == NULL)
+		return (&prison0);
+
+	return (td->td_ucred->cr_prison);
+}
+
 void
 pax_get_flags(struct proc *p, uint32_t *flags)
 {
@@ -103,26 +120,81 @@ pax_get_flags(struct proc *p, uint32_t *flags)
 	*flags = p->p_pax;
 }
 
+void
+pax_get_flags_td(struct thread *td, uint32_t *flags)
+{
+
+	*flags = td->td_pax;
+}
+
+/*
+ * Kernel process and init needs special handling
+ * The init is the only one user-space process,
+ * which's parent is the kernel.
+ * Other processes with proc0 parent are kernel
+ * processes.
+ * The kernel itself (pid0) has NULL in the p_pptr.
+ */
+int
+pax_proc_is_special(struct proc *p)
+{
+	sx_slock(&proctree_lock);
+	if (p->p_pptr == &proc0 || p->p_pptr == NULL) {
+		CTR2(KTR_PAX, "%s : pid = %d",
+		    __func__, p->p_pid);
+		sx_sunlock(&proctree_lock);
+
+		return (1);
+	}
+	sx_sunlock(&proctree_lock);
+
+	return (0);
+}
+
+static int
+pax_validate_flags(uint32_t flags)
+{
+
+	if ((flags & ~PAX_NOTE_ALL) != 0)
+		return (1);
+
+	return (0);
+}
+
+static int
+pax_check_conflicting_modes(uint32_t mode)
+{
+
+	if (((mode & PAX_NOTE_ALL_ENABLED) & ((mode & PAX_NOTE_ALL_DISABLED) >> 1)) != 0)
+		return (1);
+
+	return (0);
+}
+
 int
 pax_elf(struct image_params *imgp, uint32_t mode)
 {
-	u_int flags, flags_aslr;
+	uint32_t flags, flags_aslr;
 
 	flags = mode;
 	flags_aslr = 0;
 
-	if ((flags & ~PAX_NOTE_ALL) != 0) {
-		printf("%s: unknown paxflags: %x\n", __func__, flags);
+	if (pax_proc_is_special(imgp->proc)) {
+		flags = PAX_NOTE_ALL_DISABLED;
+		imgp->proc->p_pax = flags;
+		return (0);
+	}
 
+	if (pax_validate_flags(flags) != 0) {
+		printf("%s: unknown paxflags: %x\n", __func__, flags);
 		return (ENOEXEC);
 	}
 
-	if (((mode & PAX_NOTE_ALL_ENABLED) & ((mode & PAX_NOTE_ALL_DISABLED) >> 1)) != 0) {
+	if (pax_check_conflicting_modes(mode) != 0) {
 		/*
 		 * indicate flags inconsistencies in dmesg and in user terminal
 		 */
-		printf("%s: inconsistent paxflags: %x\n", __func__, mode);
-
+		printf("%s: inconsistent paxflags: %x\n", __func__, flags);
 		return (ENOEXEC);
 	}
 
@@ -130,12 +202,11 @@ pax_elf(struct image_params *imgp, uint32_t mode)
 	flags_aslr = pax_aslr_setup_flags(imgp, mode);
 #endif
 
-	flags |= flags_aslr;
+	flags = flags_aslr;
 
 	CTR3(KTR_PAX, "%s : flags = %x mode = %x",
 	    __func__, flags, mode);
 
-	imgp->pax_flags = flags;
 	imgp->proc->p_pax = flags;
 
 	return (0);
@@ -148,8 +219,8 @@ pax_elf(struct image_params *imgp, uint32_t mode)
 static void
 pax_sysinit(void)
 {
-
-	return;
+	if (bootverbose)
+		printf("pax: initialize and check PaX and HardeneBSD features.\n");
 }
 SYSINIT(pax, SI_SUB_PAX, SI_ORDER_FIRST, pax_sysinit, NULL);
 
@@ -160,42 +231,8 @@ pax_init_prison(struct prison *pr)
 	CTR2(KTR_PAX, "%s: Setting prison %s PaX variables\n",
 	    __func__, pr->pr_name);
 
-	if (pr == &prison0) {
-		/* prison0 has no parent, use globals */
-#ifdef PAX_ASLR
-		pr->pr_pax_aslr_status = pax_aslr_status;
-		pr->pr_pax_aslr_mmap_len = pax_aslr_mmap_len;
-		pr->pr_pax_aslr_stack_len = pax_aslr_stack_len;
-		pr->pr_pax_aslr_exec_len = pax_aslr_exec_len;
+	pax_aslr_init_prison(pr);
 #ifdef COMPAT_FREEBSD32
-		pr->pr_pax_aslr_compat_status = pax_aslr_compat_status;
-		pr->pr_pax_aslr_compat_mmap_len = pax_aslr_compat_mmap_len;
-		pr->pr_pax_aslr_compat_stack_len = pax_aslr_compat_stack_len;
-		pr->pr_pax_aslr_compat_exec_len = pax_aslr_compat_exec_len;
-#endif /* COMPAT_FREEBSD32 */
-#endif /* PAX_ASLR */
-	} else {
-#ifdef PAX_ASLR
-		struct prison *pr_p;
-
-		KASSERT(pr->pr_parent != NULL,
-		   ("%s: pr->pr_parent == NULL", __func__));
-		pr_p = pr->pr_parent;
-
-		pr->pr_pax_aslr_status = pr_p->pr_pax_aslr_status;
-		pr->pr_pax_aslr_mmap_len = pr_p->pr_pax_aslr_mmap_len;
-		pr->pr_pax_aslr_stack_len = pr_p->pr_pax_aslr_stack_len;
-		pr->pr_pax_aslr_exec_len = pr_p->pr_pax_aslr_exec_len;
-#ifdef COMPAT_FREEBSD32
-		pr->pr_pax_aslr_compat_status =
-		    pr_p->pr_pax_aslr_compat_status;
-		pr->pr_pax_aslr_compat_mmap_len =
-		    pr_p->pr_pax_aslr_compat_mmap_len;
-		pr->pr_pax_aslr_compat_stack_len =
-		    pr_p->pr_pax_aslr_compat_stack_len;
-		pr->pr_pax_aslr_compat_exec_len =
-		    pr_p->pr_pax_aslr_compat_exec_len;
-#endif /* COMPAT_FREEBSD32 */
-#endif /* PAX_ASLR */
-	}
+	pax_aslr_init_prison32(pr);
+#endif
 }

@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
- * Copyright (c) 2013-2014, by Oliver Pinter <oliver.pntr at gmail.com>
+ * Copyright (c) 2013-2015, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
  * Copyright (c) 2014, by Shawn Webb <lattera at gmail.com>
  * All rights reserved.
  *
@@ -27,19 +27,33 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD$
+ *
+ * HardenedBSD-version: f3999cdf0bf50578e038f10b952ffc1c446d8927
+ *
  */
 
 #ifndef	__SYS_PAX_H
 #define	__SYS_PAX_H
 
-#ifdef _KERNEL
+#if defined(_KERNEL) || defined(_WANT_PRISON)
+struct hardening_features {
+	int	 hr_pax_aslr_status;		/* (p) PaX ASLR enabled */
+	int	 hr_pax_aslr_mmap_len;		/* (p) Number of bits randomized with mmap */
+	int	 hr_pax_aslr_stack_len;		/* (p) Number of bits randomized with stack */
+	int	 hr_pax_aslr_exec_len;		/* (p) Number of bits randomized with the execbase */
+	int	 hr_pax_aslr_compat_status;	/* (p) PaX ASLR enabled (compat32) */
+	int	 hr_pax_aslr_compat_mmap_len;	/* (p) Number of bits randomized with mmap (compat32) */
+	int	 hr_pax_aslr_compat_stack_len;	/* (p) Number of bits randomized with stack (compat32) */
+	int	 hr_pax_aslr_compat_exec_len;	/* (p) Number of bits randomized with the execbase (compat32) */
+};
+#endif
 
+#ifdef _KERNEL
 struct image_params;
 struct prison;
 struct thread;
 struct proc;
 struct vnode;
-struct vmspace;
 struct vm_offset_t;
 
 /*
@@ -58,32 +72,16 @@ extern const char *pax_status_str[];
 
 extern const char *pax_status_simple_str[];
 
-extern int pax_aslr_status;
-
-extern int pax_aslr_mmap_len;
-extern int pax_aslr_stack_len;
-extern int pax_aslr_exec_len;
-#ifdef COMPAT_FREEBSD32
-extern int pax_aslr_compat_status;
-extern int pax_aslr_compat_mmap_len;
-extern int pax_aslr_compat_stack_len;
-extern int pax_aslr_compat_exec_len;
-#endif /* COMPAT_FREEBSD32 */
-
 /*
  * generic pax functions
  */
 int pax_elf(struct image_params *, uint32_t);
-extern int pax_log_log;
-extern int pax_log_ulog;
-
-#define PAX_LOG_LOG		0
-#define PAX_LOG_ULOG		0
-
-void pax_init_prison(struct prison *pr);
 void pax_get_flags(struct proc *p, uint32_t *flags);
+void pax_get_flags_td(struct thread *td, uint32_t *flags);
 struct prison *pax_get_prison(struct proc *p);
+struct prison *pax_get_prison_td(struct thread *td);
 void pax_init_prison(struct prison *pr);
+int pax_proc_is_special(struct proc *p);
 
 /*
  * ASLR related functions
@@ -91,23 +89,34 @@ void pax_init_prison(struct prison *pr);
 int pax_aslr_active(struct proc *p);
 void pax_aslr_init_vmspace(struct proc *p);
 void pax_aslr_init_vmspace32(struct proc *p);
+#ifdef PAX_ASLR
+void pax_aslr_init_prison(struct prison *pr);
+void pax_aslr_init_prison32(struct prison *pr);
+#else
+#define	pax_aslr_init_prison(pr)	do {} while (0)
+#define	pax_aslr_init_prison32(pr)	do {} while (0)
+#endif
 void pax_aslr_init(struct image_params *imgp);
 void pax_aslr_execbase(struct proc *p, u_long *et_dyn_addr);
 void pax_aslr_mmap(struct proc *p, vm_offset_t *addr, 
     vm_offset_t orig_addr, int flags);
-u_int pax_aslr_setup_flags(struct image_params *imgp, u_int mode);
+uint32_t pax_aslr_setup_flags(struct image_params *imgp, uint32_t mode);
 void pax_aslr_stack(struct proc *p, uintptr_t *addr);
-
+void pax_aslr_stack_adjust(struct proc *p, u_long *ssiz);
 #endif /* _KERNEL */
 
-#define ELF_NOTE_TYPE_PAX_TAG   3
-#define PAX_NOTE_ASLR       0x10
-#define PAX_NOTE_NOASLR     0x20
+#define	PAX_NOTE_MPROTECT	0x00000001
+#define	PAX_NOTE_NOMPROTECT	0x00000002
+#define	PAX_NOTE_SEGVGUARD	0x00000004
+#define	PAX_NOTE_NOSEGVGUARD	0x00000008
+#define	PAX_NOTE_ASLR		0x00000010
+#define	PAX_NOTE_NOASLR		0x00000020
 
-#define PAX_NOTE_ALL_ENABLED	\
-			(PAX_NOTE_ASLR)
-#define PAX_NOTE_ALL_DISABLED	\
-			(PAX_NOTE_NOASLR)
-#define PAX_NOTE_ALL	(PAX_NOTE_ALL_ENABLED | PAX_NOTE_ALL_DISABLED)
+#define	PAX_NOTE_RESERVED0	0x40000000
+#define	PAX_NOTE_FINALIZED	0x80000000
+
+#define	PAX_NOTE_ALL_ENABLED	(PAX_NOTE_ASLR)
+#define	PAX_NOTE_ALL_DISABLED	(PAX_NOTE_NOASLR)
+#define	PAX_NOTE_ALL	(PAX_NOTE_ALL_ENABLED | PAX_NOTE_ALL_DISABLED)
 
 #endif /* __SYS_PAX_H */
