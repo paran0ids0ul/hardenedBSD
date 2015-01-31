@@ -105,15 +105,11 @@ void pax_aslr_stack(struct proc *p, uintptr_t *addr);
 void pax_aslr_stack_adjust(struct proc *p, u_long *ssiz);
 #endif /* _KERNEL */
 
-#define	PAX_NOTE_MPROTECT	0x00000001
-#define	PAX_NOTE_NOMPROTECT	0x00000002
-#define	PAX_NOTE_SEGVGUARD	0x00000004
-#define	PAX_NOTE_NOSEGVGUARD	0x00000008
-#define	PAX_NOTE_ASLR		0x00000010
-#define	PAX_NOTE_NOASLR		0x00000020
-
-#define	PAX_NOTE_RESERVED0	0x40000000
-#define	PAX_NOTE_FINALIZED	0x80000000
+/*
+ * keep this values, to keep compatibility with HardenedBSD
+ */
+#define	PAX_NOTE_ASLR		0x00000040
+#define	PAX_NOTE_NOASLR		0x00000080
 
 #define	PAX_NOTE_ALL_ENABLED	(PAX_NOTE_ASLR)
 #define	PAX_NOTE_ALL_DISABLED	(PAX_NOTE_NOASLR)
