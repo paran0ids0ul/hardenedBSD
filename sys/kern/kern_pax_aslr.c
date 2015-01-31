@@ -798,13 +798,13 @@ pax_aslr_stack(struct proc *p, uintptr_t *addr)
 }
 
 void
-pax_aslr_stack_adjust(struct proc *p, u_long *ssiz)
+pax_aslr_stack_fixup(struct proc *p)
 {
 
 	if (!pax_aslr_active(p))
 		return;
 
-	*ssiz += p->p_vmspace->vm_aslr_delta_stack;
+	p->p_vmspace->vm_maxsaddr -= p->p_vmspace->vm_aslr_delta_stack;
 }
 
 void
