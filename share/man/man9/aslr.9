@@ -25,7 +25,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd January 17, 2015
+.Dd January 31, 2015
 .Dt ASLR 9
 .Os
 .Sh NAME
@@ -70,9 +70,6 @@ When compiled with the PAX_ASLR option, systems will have ASLR
 enabled. For systems with that kernel option enabled, if a user wants
 to disable ASLR for a given application, the user must force that
 application to opt-out.
-.Hx
-has a special application called secadm for opting applications in to
-or out of exploit mitigation features such as ASLR.
 
 Another kernel option,
 .Cd PAX_SYSCTLS
@@ -184,10 +181,10 @@ execbase.
 .It
 Values:
 .br
-For 32bit systems, minimum of 6, maximum of 11. For 64bit systems,
-minimum of 12, maximum of 22.
+For 32bit systems, minimum of 8, maximum of 21. For 64bit systems,
+minimum of 16, maximum of 42.
 .It
-Default: For 32bit systems: 6. For 64bit systems: 21.
+Default: For 32bit systems: 14. For 64bit systems: 16.
 .El
 .It
 hardening.pax.aslr.mmap_len
@@ -201,10 +198,10 @@ calls.
 .It
 Values:
 .br
-For 32bit systems, minimum of 8, maximum of 16. For 64bit systems,
-minimum of 16, maximum of 32.
+For 32bit systems, minimum of 8, maximum of 21. For 64bit systems,
+minimum of 16, maximum of 42.
 .It
-Default: For 32bit systems: 8. For 64bit systems: 21.
+Default: For 32bit systems: 14. For 64bit systems: 21.
 .El
 .It
 hardening.pax.aslr.stack_len
@@ -216,10 +213,10 @@ Description: Set the number of bits to be randomized for the stack.
 .It
 Values:
 .br
-For 32bit systems, minimum of 6, maximum of 11. For 64bit systems,
-minimum of 12, maximum of 21.
+For 32bit systems, minimum of 8, maximum of 21. For 64bit systems,
+minimum of 16, maximum of 42.
 .It
-Default: For 32bit systems: 6. For 64bit systems: 16.
+Default: For 32bit systems: 8. For 64bit systems: 16.
 .El
 .El
 .Sh SEE ALSO
@@ -243,9 +240,7 @@ Default: For 32bit systems: 6. For 64bit systems: 16.
 .%U https://github.com/HardenedBSD/secadm
 .Re
 .Sh HISTORY
-ASLR was first introduced in
-.Hx
-and work is ongoing to
+ASLR was first introduced in HardenedBSD and work is ongoing to
 upstream to
 .Fx 11.0-CURRENT.
 .Sh AUTHORS
@@ -256,6 +251,4 @@ The ASLR implementation was written by
 .An Oliver Pinter and
 .An Shawn Webb .
 .Sh BUGS
-Under extremely high load, the VM system can be placed under a lot of
-pressure and exhibit bugs. Investigation is ongoing and a fix will
-hopefully be available soon.
+No known bugs at this time.
