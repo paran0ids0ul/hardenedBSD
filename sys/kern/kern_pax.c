@@ -28,7 +28,8 @@
  *
  * $FreeBSD$
  *
- * HardenedBSD-version: f3999cdf0bf50578e038f10b952ffc1c446d8927
+ * HardenedBSD-version: ef45a2267c71c559f735f4ab87a8dc18ea6b7f96
+ * HardenedBSD-version: v15
  *
  */
 
