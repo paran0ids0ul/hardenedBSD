@@ -276,10 +276,11 @@ siena_board_cfg(
 {
 	efx_nic_cfg_t *encp = &(enp->en_nic_cfg);
 	efx_mcdi_iface_t *emip = &(enp->en_u.siena.enu_mip);
-	uint8_t outbuf[MAX(MC_CMD_GET_BOARD_CFG_OUT_LEN,
+	uint8_t outbuf[MAX(MC_CMD_GET_BOARD_CFG_OUT_LENMIN,
 		    MC_CMD_GET_RESOURCE_LIMITS_OUT_LEN)];
 	efx_mcdi_req_t req;
-	uint8_t *src;
+	uint8_t *mac_addr;
+	efx_dword_t *capabilities;
 	int rc;
 
 	/* Board configuration */
@@ -288,7 +289,7 @@ siena_board_cfg(
 	req.emr_in_buf = NULL;
 	req.emr_in_length = 0;
 	req.emr_out_buf = outbuf;
-	req.emr_out_length = MC_CMD_GET_BOARD_CFG_OUT_LEN;
+	req.emr_out_length = MC_CMD_GET_BOARD_CFG_OUT_LENMIN;
 
 	efx_mcdi_execute(enp, &req);
 
@@ -297,21 +298,39 @@ siena_board_cfg(
 		goto fail1;
 	}
 
-	if (req.emr_out_length_used < MC_CMD_GET_BOARD_CFG_OUT_LEN) {
+	if (req.emr_out_length_used < MC_CMD_GET_BOARD_CFG_OUT_LENMIN) {
 		rc = EMSGSIZE;
 		goto fail2;
 	}
 
-	if (emip->emi_port == 1)
-		src = MCDI_OUT2(req, uint8_t,
+	if (emip->emi_port == 1) {
+		mac_addr = MCDI_OUT2(req, uint8_t,
 			    GET_BOARD_CFG_OUT_MAC_ADDR_BASE_PORT0);
-	else
-		src = MCDI_OUT2(req, uint8_t,
+		capabilities = MCDI_OUT2(req, efx_dword_t,
+			    GET_BOARD_CFG_OUT_CAPABILITIES_PORT0);
+	} else {
+		mac_addr = MCDI_OUT2(req, uint8_t,
 			    GET_BOARD_CFG_OUT_MAC_ADDR_BASE_PORT1);
-	EFX_MAC_ADDR_COPY(encp->enc_mac_addr, src);
+		capabilities = MCDI_OUT2(req, efx_dword_t,
+			    GET_BOARD_CFG_OUT_CAPABILITIES_PORT1);
+	}
+	EFX_MAC_ADDR_COPY(encp->enc_mac_addr, mac_addr);
 
 	encp->enc_board_type = MCDI_OUT_DWORD(req,
 				    GET_BOARD_CFG_OUT_BOARD_TYPE);
+
+	/* Additional capabilities */
+	encp->enc_clk_mult = 1;
+	if (MCDI_CMD_DWORD_FIELD(capabilities, CAPABILITIES_TURBO)) {
+		enp->en_features |= EFX_FEATURE_TURBO;
+
+		if (MCDI_CMD_DWORD_FIELD(capabilities,
+		    CAPABILITIES_TURBO_ACTIVE))
+			encp->enc_clk_mult = 2;
+	}
+
+	encp->enc_evq_moderation_max = EFX_EV_TIMER_QUANTUM <<
+		FRF_AB_TIMER_VAL_WIDTH / encp->enc_clk_mult;
 
 	/* Resource limits */
 	req.emr_cmd = MC_CMD_GET_RESOURCE_LIMITS;
@@ -324,7 +343,8 @@ siena_board_cfg(
 	efx_mcdi_execute(enp, &req);
 
 	if (req.emr_rc == 0) {
-		if (req.emr_out_length_used < MC_CMD_GET_RESOURCE_LIMITS_OUT_LEN) {
+		if (req.emr_out_length_used <
+		    MC_CMD_GET_RESOURCE_LIMITS_OUT_LEN) {
 			rc = EMSGSIZE;
 			goto fail3;
 		}
@@ -606,9 +626,6 @@ siena_nic_probe(
 
 	if ((rc = siena_board_cfg(enp)) != 0)
 		goto fail4;
-
-	encp->enc_evq_moderation_max =
-		EFX_EV_TIMER_QUANTUM << FRF_CZ_TIMER_VAL_WIDTH;
 
 	if ((rc = siena_phy_cfg(enp)) != 0)
 		goto fail5;

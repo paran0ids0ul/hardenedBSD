@@ -89,7 +89,8 @@ efx_ev_rx_not_ok(
 	if (EFX_QWORD_FIELD(*eqp, FSF_AZ_RX_EV_TOBE_DISC) != 0) {
 		EFX_EV_QSTAT_INCR(eep, EV_RX_TOBE_DISC);
 		EFSYS_PROBE(tobe_disc);
-		/* Assume this is a unicast address mismatch, unless below
+		/*
+		 * Assume this is a unicast address mismatch, unless below
 		 * we find either FSF_AZ_RX_EV_ETH_CRC_ERR or
 		 * EV_RX_PAUSE_FRM_ERR is set.
 		 */
@@ -102,7 +103,8 @@ efx_ev_rx_not_ok(
 		(*flagsp) |= EFX_DISCARD;
 
 #if (EFSYS_OPT_RX_HDR_SPLIT || EFSYS_OPT_RX_SCATTER)
-		/* Lookout for payload queue ran dry errors and ignore them.
+		/*
+		 * Lookout for payload queue ran dry errors and ignore them.
 		 *
 		 * Sadly for the header/data split cases, the descriptor
 		 * pointer in this event refers to the header queue and
@@ -575,9 +577,9 @@ efx_ev_mcdi(
 
 	case MCDI_EVENT_CODE_CMDDONE:
 		efx_mcdi_ev_cpl(enp,
-				MCDI_EV_FIELD(*eqp, CMDDONE_SEQ),
-				MCDI_EV_FIELD(*eqp, CMDDONE_DATALEN),
-				MCDI_EV_FIELD(*eqp, CMDDONE_ERRNO));
+				MCDI_EV_FIELD(eqp, CMDDONE_SEQ),
+				MCDI_EV_FIELD(eqp, CMDDONE_DATALEN),
+				MCDI_EV_FIELD(eqp, CMDDONE_ERRNO));
 		break;
 
 	case MCDI_EVENT_CODE_LINKCHANGE: {
@@ -842,13 +844,14 @@ efx_ev_qmoderate(
 	__in		unsigned int us)
 {
 	efx_nic_t *enp = eep->ee_enp;
+	efx_nic_cfg_t *encp = &(enp->en_nic_cfg);
 	unsigned int locked;
 	efx_dword_t dword;
 	int rc;
 
 	EFSYS_ASSERT3U(eep->ee_magic, ==, EFX_EVQ_MAGIC);
 
-	if (us > enp->en_nic_cfg.enc_evq_moderation_max) {
+	if (us > encp->enc_evq_moderation_max) {
 		rc = EINVAL;
 		goto fail1;
 	}
@@ -867,21 +870,20 @@ efx_ev_qmoderate(
 		uint32_t timer_val;
 
 		/* Calculate the timer value in quanta */
-		us -= (us % EFX_EV_TIMER_QUANTUM);
-		if (us < EFX_EV_TIMER_QUANTUM)
-			us = EFX_EV_TIMER_QUANTUM;
-
-		timer_val = us / EFX_EV_TIMER_QUANTUM;
+		timer_val = us * encp->enc_clk_mult / EFX_EV_TIMER_QUANTUM;
 
 		/* Moderation value is base 0 so we need to deduct 1 */
+		if (timer_val > 0)
+			timer_val--;
+
 		if (enp->en_family == EFX_FAMILY_FALCON)
 			EFX_POPULATE_DWORD_2(dword,
 			    FRF_AB_TC_TIMER_MODE, FFE_AB_TIMER_MODE_INT_HLDOFF,
-			    FRF_AB_TIMER_VAL, timer_val - 1);
+			    FRF_AB_TIMER_VAL, timer_val);
 		else
 			EFX_POPULATE_DWORD_2(dword,
 			    FRF_CZ_TC_TIMER_MODE, FFE_CZ_TIMER_MODE_INT_HLDOFF,
-			    FRF_CZ_TC_TIMER_VAL, timer_val - 1);
+			    FRF_CZ_TC_TIMER_VAL, timer_val);
 	}
 
 	locked = (eep->ee_index == 0) ? 1 : 0;
