@@ -253,7 +253,7 @@ prison0_init(void)
 	prison0.pr_osreldate = osreldate;
 	strlcpy(prison0.pr_osrelease, osrelease, sizeof(prison0.pr_osrelease));
 
-#ifdef PAX
+#ifdef PAX_ASLR
 	pax_init_prison(&prison0);
 #endif
 }
