@@ -500,10 +500,10 @@ proc0_init(void *dummy __unused)
 	td->td_flags = TDF_INMEM;
 	td->td_pflags = TDP_KTHREAD;
 	td->td_cpuset = cpuset_thread0();
-#if defined(PAX_ASLR) || defined(PAX_SEGVGUARD) || defined(PAX_NOEXEC)
+#if defined(PAX_ASLR)
 	td->td_pax = PAX_NOTE_ALL_DISABLED;
 #endif
-	prison0.pr_cpuset = cpuset_ref(td->td_cpuset);
+	prison0_init();
 	p->p_peers = 0;
 	p->p_leader = p;
 	p->p_reaper = p;

@@ -67,16 +67,22 @@ __FBSDID("$FreeBSD$");
 #include "sfxge.h"
 #include "sfxge_tx.h"
 
-/* Set the block level to ensure there is space to generate a
- * large number of descriptors for TSO.  With minimum MSS and
- * maximum mbuf length we might need more than a ring-ful of
- * descriptors, but this should not happen in practice except
- * due to deliberate attack.  In that case we will truncate
- * the output at a packet boundary.
+/*
+ * Estimate maximum number of Tx descriptors required for TSO packet.
+ * With minimum MSS and maximum mbuf length we might need more (even
+ * than a ring-ful of descriptors), but this should not happen in
+ * practice except due to deliberate attack.  In that case we will
+ * truncate the output at a packet boundary.
  */
 #define	SFXGE_TSO_MAX_DESC						\
 	(SFXGE_TSO_MAX_SEGS * 2 + SFXGE_TX_MAPPING_MAX_SEG - 1)
-#define	SFXGE_TXQ_BLOCK_LEVEL(_entries)	((_entries) - SFXGE_TSO_MAX_DESC)
+
+/*
+ * Set the block level to ensure there is space to generate a
+ * large number of descriptors for TSO.
+ */
+#define	SFXGE_TXQ_BLOCK_LEVEL(_entries)					\
+	(EFX_TXQ_LIMIT(_entries) - SFXGE_TSO_MAX_DESC)
 
 #ifdef SFXGE_HAVE_MQ
 
@@ -208,6 +214,9 @@ sfxge_tx_qdpl_swizzle(struct sfxge_txq *txq)
 		count++;
 	} while (mbuf != NULL);
 
+	if (count > stdp->std_put_hiwat)
+		stdp->std_put_hiwat = count;
+
 	/* Append the reversed put list to the get list. */
 	KASSERT(*get_tailp == NULL, ("*get_tailp != NULL"));
 	*stdp->std_getp = get_next;
@@ -302,7 +311,7 @@ static int sfxge_tx_queue_mbuf(struct sfxge_txq *txq, struct mbuf *mbuf)
 	if (mbuf->m_pkthdr.csum_flags & CSUM_TSO)
 		prefetch_read_many(mbuf->m_data);
 
-	if (txq->init_state != SFXGE_TXQ_STARTED) {
+	if (__predict_false(txq->init_state != SFXGE_TXQ_STARTED)) {
 		rc = EINTR;
 		goto reject;
 	}
@@ -505,7 +514,7 @@ sfxge_tx_qdpl_service(struct sfxge_txq *txq)
  * list", otherwise we atomically push it on the "put list".  The swizzle
  * function takes care of ordering.
  *
- * The length of the put list is bounded by SFXGE_TX_MAX_DEFFERED.  We
+ * The length of the put list is bounded by SFXGE_TX_MAX_DEFERRED.  We
  * overload the csum_data field in the mbuf to keep track of this length
  * because there is no cheap alternative to avoid races.
  */
@@ -569,7 +578,7 @@ sfxge_tx_qdpl_put(struct sfxge_txq *txq, struct mbuf *mbuf, int locked)
 
 /*
  * Called from if_transmit - will try to grab the txq lock and enqueue to the
- * put list if it succeeds, otherwise will push onto the defer list.
+ * put list if it succeeds, otherwise try to push onto the defer list if space.
  */
 int
 sfxge_tx_packet_add(struct sfxge_txq *txq, struct mbuf *m)
@@ -1104,8 +1113,8 @@ sfxge_tx_queue_tso(struct sfxge_txq *txq, struct mbuf *mbuf,
 			 * the remainder of the input mbuf but do not
 			 * roll back the work we have done.
 			 */
-			if (txq->n_pend_desc >
-			    SFXGE_TSO_MAX_DESC - (1 + SFXGE_TX_MAPPING_MAX_SEG)) {
+			if (txq->n_pend_desc + 1 /* header */ + n_dma_seg >
+			    SFXGE_TSO_MAX_DESC) {
 				txq->tso_pdrop_too_many++;
 				break;
 			}
@@ -1134,7 +1143,7 @@ sfxge_tx_qunblock(struct sfxge_txq *txq)
 
 	SFXGE_EVQ_LOCK_ASSERT_OWNED(evq);
 
-	if (txq->init_state != SFXGE_TXQ_STARTED)
+	if (__predict_false(txq->init_state != SFXGE_TXQ_STARTED))
 		return;
 
 	SFXGE_TXQ_LOCK(txq);
@@ -1394,7 +1403,6 @@ sfxge_tx_qinit(struct sfxge_softc *sc, unsigned int txq_index,
 	/* Allocate and zero DMA space for the descriptor ring. */
 	if ((rc = sfxge_dma_alloc(sc, EFX_TXQ_SIZE(sc->txq_entries), esmp)) != 0)
 		return (rc);
-	(void)memset(esmp->esm_base, 0, EFX_TXQ_SIZE(sc->txq_entries));
 
 	/* Allocate buffer table entries. */
 	sfxge_sram_buf_tbl_alloc(sc, EFX_TXQ_NBUFS(sc->txq_entries),
@@ -1480,6 +1488,10 @@ sfxge_tx_qinit(struct sfxge_softc *sc, unsigned int txq_index,
 			SYSCTL_CHILDREN(txq_node), OID_AUTO,
 			"dpl_get_hiwat", CTLFLAG_RD | CTLFLAG_STATS,
 			&stdp->std_get_hiwat, 0, "");
+	SYSCTL_ADD_UINT(device_get_sysctl_ctx(sc->dev),
+			SYSCTL_CHILDREN(txq_node), OID_AUTO,
+			"dpl_put_hiwat", CTLFLAG_RD | CTLFLAG_STATS,
+			&stdp->std_put_hiwat, 0, "");
 #endif
 
 	txq->type = type;
@@ -1559,6 +1571,29 @@ sfxge_tx_stat_init(struct sfxge_softc *sc)
 			sc, id, sfxge_tx_stat_handler, "LU",
 			"");
 	}
+}
+
+uint64_t
+sfxge_tx_get_drops(struct sfxge_softc *sc)
+{
+	unsigned int index;
+	uint64_t drops = 0;
+	struct sfxge_txq *txq;
+
+	/* Sum across all TX queues */
+	for (index = 0; index < sc->txq_count; index++) {
+		txq = sc->txq[index];
+		/*
+		 * In theory, txq->put_overflow and txq->netdown_drops
+		 * should use atomic operation and other should be
+		 * obtained under txq lock, but it is just statistics.
+		 */
+		drops += txq->drops + txq->get_overflow +
+			 txq->get_non_tcp_overflow +
+			 txq->put_overflow + txq->netdown_drops +
+			 txq->tso_pdrop_too_many + txq->tso_pdrop_no_rsrc;
+	}
+	return (drops);
 }
 
 void

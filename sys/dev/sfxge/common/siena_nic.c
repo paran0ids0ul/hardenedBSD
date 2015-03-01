@@ -329,8 +329,10 @@ siena_board_cfg(
 			encp->enc_clk_mult = 2;
 	}
 
-	encp->enc_evq_moderation_max = EFX_EV_TIMER_QUANTUM <<
-		FRF_AB_TIMER_VAL_WIDTH / encp->enc_clk_mult;
+	encp->enc_evq_timer_quantum_ns =
+		EFX_EVQ_SIENA_TIMER_QUANTUM_NS / encp->enc_clk_mult;
+	encp->enc_evq_timer_max_us = (encp->enc_evq_timer_quantum_ns <<
+		FRF_CZ_TC_TIMER_VAL_WIDTH) / 1000;
 
 	/* Resource limits */
 	req.emr_cmd = MC_CMD_GET_RESOURCE_LIMITS;
@@ -478,7 +480,7 @@ siena_phy_cfg(
 	if (MCDI_OUT_DWORD_FIELD(req, GET_PHY_CFG_OUT_FLAGS,
 	    GET_PHY_CFG_OUT_BIST))
 		encp->enc_bist_mask |= (1 << EFX_PHY_BIST_TYPE_NORMAL);
-#endif	/* EFSYS_OPT_BIST */
+#endif	/* EFSYS_OPT_PHY_BIST */
 
 	return (0);
 
@@ -610,7 +612,6 @@ siena_nic_probe(
 	unsigned int mask;
 	int rc;
 
-	mask = 0;	/* XXX: pacify gcc */
 	EFSYS_ASSERT3U(enp->en_family, ==, EFX_FAMILY_SIENA);
 
 	/* Read clear any assertion state */
